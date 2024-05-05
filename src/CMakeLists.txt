@@ -7,7 +7,10 @@ set(qtwpe_SOURCES
 )
 
 set(qtwpe_LIBRARIES
-    Qt::Core Qt::Gui Qt::GuiPrivate Qt::Quick
+    Qt${QT_VERSION}::Core
+    Qt${QT_VERSION}::Gui
+    Qt${QT_VERSION}::GuiPrivate
+    Qt${QT_VERSION}::Quick
     PkgConfig::EGL
     PkgConfig::EPOXY
     PkgConfig::WPE
