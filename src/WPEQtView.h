@@ -41,6 +41,7 @@ class WPEQtView : public QQuickItem {
     Q_PROPERTY(QString title READ title NOTIFY titleChanged)
     Q_PROPERTY(bool canGoBack READ canGoBack NOTIFY loadingChanged)
     Q_PROPERTY(bool canGoForward READ canGoForward NOTIFY loadingChanged)
+    Q_PROPERTY(QColor themeColor READ themeColor NOTIFY themeColorChanged)
     Q_ENUMS(LoadStatus)
 
 public:
@@ -64,6 +65,7 @@ public:
     bool canGoBack() const;
     bool isLoading() const;
     bool canGoForward() const;
+    QColor themeColor() const;
 
 public Q_SLOTS:
     void goBack();
@@ -79,6 +81,7 @@ Q_SIGNALS:
     void titleChanged();
     void loadingChanged(WPEQtViewLoadRequest* loadRequest);
     void loadProgressChanged();
+    void themeColorChanged();
     void webProcessCrashed();
 
 protected:
@@ -118,10 +121,13 @@ private:
     static void notifyLoadProgressCallback(WPEQtView*);
     static void notifyLoadChangedCallback(WebKitWebView*, WebKitLoadEvent, WPEQtView*);
     static void notifyLoadFailedCallback(WebKitWebView*, WebKitLoadEvent, const gchar* failingURI, GError*, WPEQtView*);
+    static void notifyThemeColorChangedCallback(WebKitWebView*, WPEQtView*);
     static void notifyWebProcessTerminatedCallback(WebKitWebView*, WebKitWebProcessTerminationReason, WPEQtView*);
     static void *createRequested(WebKitWebView*, WebKitNavigationAction*, WPEQtView*);
 
     GRefPtr<WebKitWebView> m_webView;
+    GRefPtr<WebKitNetworkSession> m_networkSession;
+    GRefPtr<WebKitWebContext> m_webContext;
     QUrl m_url;
     QString m_html;
     QUrl m_baseUrl;

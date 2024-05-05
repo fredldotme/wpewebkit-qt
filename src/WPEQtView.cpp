@@ -118,14 +118,47 @@ void WPEQtView::createWebView()
     if (!backend)
         return;
 
+    const auto appName = QGuiApplication::applicationName();
+    const auto dataHome = QString::fromUtf8(qgetenv("XDG_DATA_HOME"));
+    const auto cacheHome = QString::fromUtf8(qgetenv("XDG_CACHE_HOME"));
+
+    const auto cacheDirRoot = QStringLiteral("%1/%2").arg(cacheHome, appName);
+    const auto dataDirRoot = QStringLiteral("%1/%2/data").arg(dataHome, appName);
+    const auto extensionsDirRoot = QStringLiteral("%1/%2/extensions").arg(dataHome, appName);
+    const auto cookiesFile = QStringLiteral("%1/%2/cookies.sqlite").arg(dataHome, appName);
+
+    m_networkSession = adoptGRef(webkit_network_session_new(dataDirRoot.toStdString().c_str(), cacheDirRoot.toStdString().c_str()));
+    m_webContext = adoptGRef(webkit_web_context_new());
+
+    webkit_network_session_set_persistent_credential_storage_enabled(m_networkSession.get(), TRUE);
+
+    auto* cookieManager = webkit_network_session_get_cookie_manager(m_networkSession.get());
+    webkit_cookie_manager_set_persistent_storage(cookieManager, cookiesFile.toStdString().c_str(), WEBKIT_COOKIE_PERSISTENT_STORAGE_SQLITE);
+
+    webkit_web_context_set_web_process_extensions_directory(m_webContext.get(), extensionsDirRoot.toStdString().c_str());
+
     m_backend = backend.get();
-    auto settings = adoptGRef(webkit_settings_new_with_settings("enable-developer-extras", TRUE,
-        "enable-webgl", TRUE, "enable-mediasource", TRUE, nullptr));
+    auto settings = adoptGRef(webkit_settings_new_with_settings(
+        "enable-developer-extras", TRUE,
+        "enable-webgl", TRUE,
+        "enable-smooth-scrolling", TRUE,
+        "enable-mediasource", TRUE,
+        "enable-fullscreen", TRUE,
+        "enable-html5-database", TRUE,
+        "enable-html5-local-storage", TRUE,
+        //"draw-compositing-indicators", TRUE,
+        "enable-site-specific-quirks", TRUE,
+        nullptr)
+    );
+
     m_webView = adoptGRef(WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
         "backend", webkit_web_view_backend_new(m_backend->backend(), [](gpointer data) {
             delete static_cast<WPEQtViewBackend*>(data);
         }, backend.release()),
-        "settings", settings.get(), nullptr)));
+        "settings", settings.get(),
+        "network-session", m_networkSession.get(),
+        "web-context", m_webContext.get(),
+        nullptr)));
 
     m_backend->setScaleFactor(window()->devicePixelRatio());
 
@@ -138,6 +171,7 @@ void WPEQtView::createWebView()
     g_signal_connect(m_webView.get(), "load-changed", G_CALLBACK(notifyLoadChangedCallback), this);
     g_signal_connect(m_webView.get(), "load-failed", G_CALLBACK(notifyLoadFailedCallback), this);
     g_signal_connect(m_webView.get(), "create", G_CALLBACK(createRequested), this);
+    g_signal_connect(m_webView.get(), "theme-color-changed", G_CALLBACK(notifyThemeColorChangedCallback), this);
     g_signal_connect(m_webView.get(), "web-process-terminated", G_CALLBACK(notifyWebProcessTerminatedCallback), this);
 
     if (!m_url.isEmpty())
@@ -201,6 +235,12 @@ void WPEQtView::notifyLoadFailedCallback(WebKitWebView*, WebKitLoadEvent, const 
     WPEQtViewLoadRequestPrivate loadRequestPrivate(QUrl(QString(failingURI)), loadStatus, error->message);
     std::unique_ptr<WPEQtViewLoadRequest> loadRequest = std::make_unique<WPEQtViewLoadRequest>(loadRequestPrivate);
     Q_EMIT view->loadingChanged(loadRequest.get());
+}
+
+void WPEQtView::notifyThemeColorChangedCallback(WebKitWebView*, WPEQtView* view)
+{
+    qDebug() << Q_FUNC_INFO << "";
+    Q_EMIT view->themeColorChanged();
 }
 
 void WPEQtView::notifyWebProcessTerminatedCallback(WebKitWebView*, WebKitWebProcessTerminationReason, WPEQtView* view)
@@ -356,6 +396,18 @@ bool WPEQtView::canGoForward() const
         return false;
 
     return webkit_web_view_can_go_forward(m_webView.get());
+}
+
+QColor WPEQtView::themeColor() const
+{
+    if (!m_webView)
+        return QColor(Qt::white);
+
+    WebKitColor color { 1.0, 1.0, 1.0, 1.0 };
+    webkit_web_view_get_theme_color(m_webView.get(), &color);
+    const auto qtColor = QColor(color.red * 255, color.green * 255, color.blue * 255, color.alpha * 255);
+    qDebug() << qtColor;
+    return qtColor;
 }
 
 /*!

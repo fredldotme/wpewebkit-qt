@@ -33,6 +33,7 @@
 #include <QWheelEvent>
 #include <wpe/fdo-egl.h>
 #include <wpe/fdo.h>
+#include <memory>
 
 class WPEQtView;
 

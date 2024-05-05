@@ -165,7 +165,7 @@ GLuint WPEQtViewBackend::texture(QOpenGLContext* context)
         std::swap(m_lockedImage, m_lockedImageOld);
 
     if (!m_lockedImage || !hasValidSurface())
-        return 0;
+        return m_textureId;
 
     QSurface *oldSurface = context->surface();
     context->makeCurrent(&m_surface);
@@ -262,7 +262,8 @@ void WPEQtViewBackend::dispatchHoverMoveEvent(QHoverEvent* event)
     uint32_t state = !!m_mousePressedButton;
     struct wpe_input_pointer_event wpeEvent = { wpe_input_pointer_event_type_motion,
         static_cast<uint32_t>(event->timestamp()),
-        event->pos().x() * m_scale, event->pos().y() * m_scale,
+        static_cast<int>(event->pos().x() * m_scale),
+        static_cast<int>(event->pos().y() * m_scale),
         m_mousePressedButton, state, modifiers() };
     wpe_view_backend_dispatch_pointer_event(backend(), &wpeEvent);
 }
@@ -298,7 +299,9 @@ void WPEQtViewBackend::dispatchMousePressEvent(QMouseEvent* event)
     m_mouseModifiers |= modifier;
     struct wpe_input_pointer_event wpeEvent = { wpe_input_pointer_event_type_button,
         static_cast<uint32_t>(event->timestamp()),
-        event->x() * m_scale, event->y() * m_scale, button, state, modifiers() };
+        static_cast<int>(event->x() * m_scale),
+        static_cast<int>(event->y() * m_scale),
+        button, state, modifiers() };
     wpe_view_backend_dispatch_pointer_event(backend(), &wpeEvent);
 }
 
@@ -323,7 +326,9 @@ void WPEQtViewBackend::dispatchMouseReleaseEvent(QMouseEvent* event)
     m_mouseModifiers &= ~modifier;
     struct wpe_input_pointer_event wpeEvent = { wpe_input_pointer_event_type_button,
         static_cast<uint32_t>(event->timestamp()),
-        event->x() * m_scale, event->y() * m_scale, button, state, modifiers() };
+        static_cast<int>(event->x() * m_scale),
+        static_cast<int>(event->y() * m_scale),
+        button, state, modifiers() };
     wpe_view_backend_dispatch_pointer_event(backend(), &wpeEvent);
 }
 
@@ -358,7 +363,9 @@ static uint32_t qt_key_to_xkb_sym(int key)
     // are handled here.
 
     switch (key) {
-    case Qt::Key_Backspace: return 0xff08;
+    case Qt::Key_Backspace: return XKB_KEY_BackSpace;
+    case Qt::Key_Enter: return XKB_KEY_Return;
+    case Qt::Key_Return: return XKB_KEY_Return;
     default: return 0;
     }
 }
@@ -400,33 +407,41 @@ void WPEQtViewBackend::dispatchKeyEvent(QKeyEvent* event, bool state)
 
 void WPEQtViewBackend::dispatchTouchEvent(QTouchEvent* event)
 {
-    wpe_input_touch_event_type eventType;
-    switch (event->type()) {
-    case QEvent::TouchBegin:
-        eventType = wpe_input_touch_event_type_down;
-        break;
-    case QEvent::TouchUpdate:
-        eventType = wpe_input_touch_event_type_motion;
-        break;
-    case QEvent::TouchEnd:
-        eventType = wpe_input_touch_event_type_up;
-        break;
-    default:
-        eventType = wpe_input_touch_event_type_null;
-        break;
-    }
-
-    int i = 0;
-    struct wpe_input_touch_event_raw* rawEvents = g_new0(wpe_input_touch_event_raw, event->touchPoints().length());
     for (auto& point : event->touchPoints()) {
-        rawEvents[i] = { eventType, static_cast<uint32_t>(event->timestamp()),
-            point.id(), static_cast<int32_t>(point.pos().x()), static_cast<int32_t>(point.pos().y()) };
-        i++;
-    }
+        wpe_input_touch_event_type eventType;
 
-    struct wpe_input_touch_event wpeEvent = { rawEvents, static_cast<uint64_t>(i), eventType,
-        static_cast<int32_t>(rawEvents[0].id),
-        static_cast<uint32_t>(event->timestamp()), modifiers() };
-    wpe_view_backend_dispatch_touch_event(backend(), &wpeEvent);
-    g_free(rawEvents);
+        switch (point.state()) {
+        case Qt::TouchPointPressed:
+            eventType = wpe_input_touch_event_type_down;
+            break;
+        case Qt::TouchPointMoved:
+            eventType = wpe_input_touch_event_type_motion;
+            break;
+        case Qt::TouchPointReleased:
+            eventType = wpe_input_touch_event_type_up;
+            break;
+        default:
+            eventType = wpe_input_touch_event_type_null;
+            break;
+        }
+
+        struct wpe_input_touch_event_raw rawEvents = {
+            eventType,
+            static_cast<uint32_t>(event->timestamp()),
+            point.id(),
+            static_cast<int32_t>(point.pos().x() * m_scale),
+            static_cast<int32_t>(point.pos().y() * m_scale)
+        };
+
+        struct wpe_input_touch_event wpeEvent = {
+            &rawEvents,
+            1,
+            eventType,
+            static_cast<int32_t>(point.id()),
+            static_cast<uint32_t>(event->timestamp()),
+            modifiers()
+        };
+
+        wpe_view_backend_dispatch_touch_event(backend(), &wpeEvent);
+    }
 }
