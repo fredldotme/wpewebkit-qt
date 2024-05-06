@@ -67,6 +67,8 @@ public:
     bool canGoForward() const;
     QColor themeColor() const;
 
+    void makeFileChooserRequest(WebKitFileChooserRequest* request);
+
 public Q_SLOTS:
     void goBack();
     void goForward();
@@ -74,6 +76,8 @@ public Q_SLOTS:
     void stop();
     void loadHtml(const QString& html, const QUrl& baseUrl = QUrl());
     void runJavaScript(const QString& script, const QJSValue& callback = QJSValue());
+    void confirmFileSelection(const QStringList files);
+    void cancelFileSelection();
 
 Q_SIGNALS:
     void webViewCreated();
@@ -83,6 +87,7 @@ Q_SIGNALS:
     void loadProgressChanged();
     void themeColorChanged();
     void webProcessCrashed();
+    void fileSelectionRequested(const bool multiple);
 
 protected:
     bool errorOccured() const { return m_errorOccured; };
@@ -123,11 +128,13 @@ private:
     static void notifyLoadFailedCallback(WebKitWebView*, WebKitLoadEvent, const gchar* failingURI, GError*, WPEQtView*);
     static void notifyThemeColorChangedCallback(WebKitWebView*, WPEQtView*);
     static void notifyWebProcessTerminatedCallback(WebKitWebView*, WebKitWebProcessTerminationReason, WPEQtView*);
+    static void notifyRunFileChooserCallback(WebKitWebView*, WebKitFileChooserRequest* request, WPEQtView*);
     static void *createRequested(WebKitWebView*, WebKitNavigationAction*, WPEQtView*);
 
     GRefPtr<WebKitWebView> m_webView;
     GRefPtr<WebKitNetworkSession> m_networkSession;
     GRefPtr<WebKitWebContext> m_webContext;
+    WebKitFileChooserRequest* m_currentFileChooserRequest { nullptr };
     QUrl m_url;
     QString m_html;
     QUrl m_baseUrl;

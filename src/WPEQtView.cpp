@@ -63,7 +63,9 @@ WPEQtView::~WPEQtView()
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLoadChangedCallback), this);
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLoadFailedCallback), this);
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLoadProgressCallback), this);
+    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyThemeColorChangedCallback), this);
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyWebProcessTerminatedCallback), this);
+    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyRunFileChooserCallback), this);
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(createRequested), this);
 
     webkit_web_view_terminate_web_process(m_webView.get());
@@ -173,6 +175,7 @@ void WPEQtView::createWebView()
     g_signal_connect(m_webView.get(), "create", G_CALLBACK(createRequested), this);
     g_signal_connect(m_webView.get(), "theme-color-changed", G_CALLBACK(notifyThemeColorChangedCallback), this);
     g_signal_connect(m_webView.get(), "web-process-terminated", G_CALLBACK(notifyWebProcessTerminatedCallback), this);
+    g_signal_connect(m_webView.get(), "run-file-chooser", G_CALLBACK(notifyRunFileChooserCallback), this);
 
     if (!m_url.isEmpty())
         webkit_web_view_load_uri(m_webView.get(), m_url.toString().toUtf8().constData());
@@ -246,6 +249,56 @@ void WPEQtView::notifyThemeColorChangedCallback(WebKitWebView*, WPEQtView* view)
 void WPEQtView::notifyWebProcessTerminatedCallback(WebKitWebView*, WebKitWebProcessTerminationReason, WPEQtView* view)
 {
     Q_EMIT view->webProcessCrashed();
+}
+
+void WPEQtView::notifyRunFileChooserCallback(WebKitWebView*, WebKitFileChooserRequest* request, WPEQtView* view)
+{
+    view->makeFileChooserRequest(request);
+}
+
+void WPEQtView::makeFileChooserRequest(WebKitFileChooserRequest* request)
+{
+    if (!request)
+        return;
+
+    m_currentFileChooserRequest = request;
+    g_object_ref(m_currentFileChooserRequest);
+
+    const auto multiple = webkit_file_chooser_request_get_select_multiple(m_currentFileChooserRequest);
+    Q_EMIT fileSelectionRequested(multiple);
+}
+
+void WPEQtView::confirmFileSelection(const QStringList files)
+{
+    if (!m_currentFileChooserRequest)
+        return;
+
+    std::vector<std::string> stdFiles;
+    for (const auto& file : files) {
+        const auto resolved = QUrl(file).toLocalFile();
+        qDebug() << resolved;
+        stdFiles.push_back(resolved.toStdString());
+    }
+
+    std::vector<const gchar*> filesToSelect;
+    for (const auto& file : stdFiles) {
+        filesToSelect.push_back(file.c_str());
+    }
+    filesToSelect.push_back(nullptr);
+
+    webkit_file_chooser_request_select_files(m_currentFileChooserRequest, (const gchar* const*)filesToSelect.data());
+    g_object_unref(m_currentFileChooserRequest);
+    m_currentFileChooserRequest = nullptr;
+}
+
+void WPEQtView::cancelFileSelection()
+{
+    if (!m_currentFileChooserRequest)
+        return;
+
+    webkit_file_chooser_request_cancel(m_currentFileChooserRequest);
+    g_object_unref(m_currentFileChooserRequest);
+    m_currentFileChooserRequest = nullptr;
 }
 
 void *WPEQtView::createRequested(WebKitWebView* web_view, WebKitNavigationAction* action, WPEQtView*)
