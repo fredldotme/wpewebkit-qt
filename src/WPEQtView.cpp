@@ -265,7 +265,24 @@ void WPEQtView::makeFileChooserRequest(WebKitFileChooserRequest* request)
     g_object_ref(m_currentFileChooserRequest);
 
     const auto multiple = webkit_file_chooser_request_get_select_multiple(m_currentFileChooserRequest);
-    Q_EMIT fileSelectionRequested(multiple);
+    QStringList mimes;
+
+    auto retrievedMimes = webkit_file_chooser_request_get_mime_types(m_currentFileChooserRequest);
+    int i = 0;
+    if (retrievedMimes) {
+        while (true) {
+            const auto mime = retrievedMimes[i];
+            if (!mime)
+                break;
+
+            mimes << QString::fromUtf8(mime);
+            ++i;
+        }
+    } else {
+        mimes << QStringLiteral("application/octet-stream");
+    }
+
+    Q_EMIT fileSelectionRequested(multiple, mimes);
 }
 
 void WPEQtView::confirmFileSelection(const QStringList files)
@@ -276,7 +293,6 @@ void WPEQtView::confirmFileSelection(const QStringList files)
     std::vector<std::string> stdFiles;
     for (const auto& file : files) {
         const auto resolved = QUrl(file).toLocalFile();
-        qDebug() << resolved;
         stdFiles.push_back(resolved.toStdString());
     }
 
@@ -459,7 +475,6 @@ QColor WPEQtView::themeColor() const
     WebKitColor color { 1.0, 1.0, 1.0, 1.0 };
     webkit_web_view_get_theme_color(m_webView.get(), &color);
     const auto qtColor = QColor(color.red * 255, color.green * 255, color.blue * 255, color.alpha * 255);
-    qDebug() << qtColor;
     return qtColor;
 }
 

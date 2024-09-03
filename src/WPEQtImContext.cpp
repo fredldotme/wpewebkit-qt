@@ -106,7 +106,7 @@ static void wpeqt_im_context_reset(WebKitInputMethodContext *context)
     *priv->surroundinText = QString();
     priv->cursorIndex = 0;
     priv->selectionIndex = 0;
-    priv->hints = Qt::ImhNone;
+    priv->hints = Qt::ImhNoPredictiveText;
 
     qApp->inputMethod()->update(Qt::ImQueryInput | Qt::ImEnabled | Qt::ImHints);
 }
@@ -157,15 +157,14 @@ static void wpeqt_im_context_content_type_changed(WPEQtImContext *context)
         break;
     }
 
-    // if (hints & WEBKIT_INPUT_HINT_NONE)
-    // if (hints & WEBKIT_INPUT_HINT_SPELLCHECK)
     if (hints & WEBKIT_INPUT_HINT_LOWERCASE)
         priv->hints |= Qt::ImhPreferLowercase;
     if (hints & WEBKIT_INPUT_HINT_UPPERCASE_CHARS)
         priv->hints |= Qt::ImhPreferUppercase;
     if (!(hints & (WEBKIT_INPUT_HINT_UPPERCASE_WORDS | WEBKIT_INPUT_HINT_UPPERCASE_SENTENCES)))
         priv->hints |= Qt::ImhNoAutoUppercase;
-    // if (hints & WEBKIT_INPUT_HINT_INHIBIT_OSK)
+
+    priv->hints |= Qt::ImhNoPredictiveText;
 
     qApp->inputMethod()->update(Qt::ImQueryInput | Qt::ImEnabled | Qt::ImHints);
 }

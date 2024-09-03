@@ -67,6 +67,7 @@ public:
 private:
     void displayImage(struct wpe_fdo_egl_exported_image*);
     uint32_t modifiers() const;
+    void dispatchTouches();
 
     EGLDisplay m_eglDisplay { nullptr };
     EGLContext m_eglContext { nullptr };

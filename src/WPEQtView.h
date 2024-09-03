@@ -87,7 +87,7 @@ Q_SIGNALS:
     void loadProgressChanged();
     void themeColorChanged();
     void webProcessCrashed();
-    void fileSelectionRequested(const bool multiple);
+    void fileSelectionRequested(const bool multiple, const QStringList mimeTypes);
 
 protected:
     bool errorOccured() const { return m_errorOccured; };

@@ -25,6 +25,7 @@
 #include <QGuiApplication>
 #include <QOpenGLFunctions>
 #include <QtGlobal>
+#include <vector>
 
 static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC imageTargetTexture2DOES;
 
@@ -407,6 +408,9 @@ void WPEQtViewBackend::dispatchKeyEvent(QKeyEvent* event, bool state)
 
 void WPEQtViewBackend::dispatchTouchEvent(QTouchEvent* event)
 {
+    std::vector<wpe_input_touch_event_raw> touches;
+    wpe_input_touch_event_type grandType = wpe_input_touch_event_type_null;
+
     for (auto& point : event->touchPoints()) {
         wpe_input_touch_event_type eventType;
 
@@ -425,23 +429,24 @@ void WPEQtViewBackend::dispatchTouchEvent(QTouchEvent* event)
             break;
         }
 
-        struct wpe_input_touch_event_raw rawEvents = {
+        struct wpe_input_touch_event_raw rawEvent = {
             eventType,
             static_cast<uint32_t>(event->timestamp()),
             point.id(),
             static_cast<int32_t>(point.pos().x() * m_scale),
             static_cast<int32_t>(point.pos().y() * m_scale)
         };
-
-        struct wpe_input_touch_event wpeEvent = {
-            &rawEvents,
-            1,
-            eventType,
-            static_cast<int32_t>(point.id()),
-            static_cast<uint32_t>(event->timestamp()),
-            modifiers()
-        };
-
-        wpe_view_backend_dispatch_touch_event(backend(), &wpeEvent);
+        touches.push_back(rawEvent);
     }
+    
+    struct wpe_input_touch_event wpeEvent = {
+        touches.data(),
+        touches.size(),
+        grandType,
+        static_cast<int32_t>(0),
+        static_cast<uint32_t>(event->timestamp()),
+        modifiers()
+    };
+
+    wpe_view_backend_dispatch_touch_event(backend(), &wpeEvent);
 }
