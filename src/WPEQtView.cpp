@@ -139,6 +139,8 @@ void WPEQtView::createWebView()
 
     webkit_web_context_set_web_process_extensions_directory(m_webContext.get(), extensionsDirRoot.toStdString().c_str());
 
+    const auto userAgent = QStringLiteral("Mozilla/5.0 (X11; Ubuntu; Linux) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15 (like iPhone OS)");
+
     m_backend = backend.get();
     auto settings = adoptGRef(webkit_settings_new_with_settings(
         "enable-developer-extras", TRUE,
@@ -150,6 +152,7 @@ void WPEQtView::createWebView()
         "enable-html5-local-storage", TRUE,
         //"draw-compositing-indicators", TRUE,
         "enable-site-specific-quirks", TRUE,
+        "user-agent", userAgent.toStdString().c_str(),
         nullptr)
     );
 
