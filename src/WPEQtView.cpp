@@ -306,7 +306,6 @@ void WPEQtView::confirmFileSelection(const QStringList files)
     filesToSelect.push_back(nullptr);
 
     webkit_file_chooser_request_select_files(m_currentFileChooserRequest, (const gchar* const*)filesToSelect.data());
-    g_object_unref(m_currentFileChooserRequest);
     m_currentFileChooserRequest = nullptr;
 }
 
