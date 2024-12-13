@@ -315,7 +315,6 @@ void WPEQtView::cancelFileSelection()
         return;
 
     webkit_file_chooser_request_cancel(m_currentFileChooserRequest);
-    g_object_unref(m_currentFileChooserRequest);
     m_currentFileChooserRequest = nullptr;
 }
 
