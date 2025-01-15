@@ -24,7 +24,9 @@
 
 #include <QQmlEngine>
 #include <QQuickItem>
+#include <QSharedPointer>
 #include <QUrl>
+#include <QGeoPositionInfoSource>
 #include <memory>
 #include <wpe/webkit.h>
 #include <wtf/glib/GRefPtr.h>
@@ -78,6 +80,8 @@ public Q_SLOTS:
     void runJavaScript(const QString& script, const QJSValue& callback = QJSValue());
     void confirmFileSelection(const QStringList files);
     void cancelFileSelection();
+    void startLocationServices();
+    void stopLocationServices();
 
 Q_SIGNALS:
     void webViewCreated();
@@ -126,9 +130,12 @@ private:
     static void notifyLoadProgressCallback(WPEQtView*);
     static void notifyLoadChangedCallback(WebKitWebView*, WebKitLoadEvent, WPEQtView*);
     static void notifyLoadFailedCallback(WebKitWebView*, WebKitLoadEvent, const gchar* failingURI, GError*, WPEQtView*);
-    static void notifyThemeColorChangedCallback(WebKitWebView*, WPEQtView*);
+    static void notifyThemeColorChangedCallback(WPEQtView*);
     static void notifyWebProcessTerminatedCallback(WebKitWebView*, WebKitWebProcessTerminationReason, WPEQtView*);
     static void notifyRunFileChooserCallback(WebKitWebView*, WebKitFileChooserRequest* request, WPEQtView*);
+    static void notifyPermissionRequestCallback(WebKitWebView *web_view, WebKitPermissionRequest *permission_request, WPEQtView* view);
+    static void notifyLocationManagerStart(WebKitWebView*, WebKitGeolocationManager* manager, WPEQtView*);
+    static void notifyLocationManagerStop(WebKitWebView*, WebKitGeolocationManager* manager, WPEQtView*);
     static void *createRequested(WebKitWebView*, WebKitNavigationAction*, WPEQtView*);
 
     GRefPtr<WebKitWebView> m_webView;
@@ -142,6 +149,8 @@ private:
     WPEQtViewBackend* m_backend { nullptr };
     bool m_errorOccured { false };
     WebKitInputMethodContext *m_imContext = nullptr;
+    WebKitGeolocationManager *m_locationManager = nullptr;
+    QSharedPointer<QGeoPositionInfoSource> m_locationSource;
 
     friend class WPEQtViewBackend;
 };

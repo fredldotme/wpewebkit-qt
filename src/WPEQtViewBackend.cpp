@@ -364,9 +364,9 @@ static uint32_t qt_key_to_xkb_sym(int key)
     // are handled here.
 
     switch (key) {
-    case Qt::Key_Backspace: return XKB_KEY_BackSpace;
-    case Qt::Key_Enter: return XKB_KEY_Return;
-    case Qt::Key_Return: return XKB_KEY_Return;
+    case Qt::Key_Backspace: return WPE_KEY_BackSpace;
+    case Qt::Key_Enter: return WPE_KEY_Return;
+    case Qt::Key_Return: return WPE_KEY_Return;
     default: return 0;
     }
 }

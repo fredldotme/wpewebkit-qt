@@ -66,6 +66,9 @@ WPEQtView::~WPEQtView()
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyThemeColorChangedCallback), this);
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyWebProcessTerminatedCallback), this);
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyRunFileChooserCallback), this);
+    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyPermissionRequestCallback), this);
+    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLocationManagerStart), this);
+    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLocationManagerStop), this);
     g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(createRequested), this);
 
     webkit_web_view_terminate_web_process(m_webView.get());
@@ -173,12 +176,18 @@ void WPEQtView::createWebView()
     g_signal_connect_swapped(m_webView.get(), "notify::uri", G_CALLBACK(notifyUrlChangedCallback), this);
     g_signal_connect_swapped(m_webView.get(), "notify::title", G_CALLBACK(notifyTitleChangedCallback), this);
     g_signal_connect_swapped(m_webView.get(), "notify::estimated-load-progress", G_CALLBACK(notifyLoadProgressCallback), this);
+    g_signal_connect_swapped(m_webView.get(), "notify::theme-color", G_CALLBACK(notifyThemeColorChangedCallback), this);
     g_signal_connect(m_webView.get(), "load-changed", G_CALLBACK(notifyLoadChangedCallback), this);
     g_signal_connect(m_webView.get(), "load-failed", G_CALLBACK(notifyLoadFailedCallback), this);
     g_signal_connect(m_webView.get(), "create", G_CALLBACK(createRequested), this);
-    g_signal_connect(m_webView.get(), "theme-color-changed", G_CALLBACK(notifyThemeColorChangedCallback), this);
     g_signal_connect(m_webView.get(), "web-process-terminated", G_CALLBACK(notifyWebProcessTerminatedCallback), this);
     g_signal_connect(m_webView.get(), "run-file-chooser", G_CALLBACK(notifyRunFileChooserCallback), this);
+
+    g_signal_connect(m_webView.get(), "permission-request", G_CALLBACK(notifyPermissionRequestCallback), this);
+
+    m_locationManager = webkit_web_context_get_geolocation_manager(m_webContext.get());
+    g_signal_connect(m_locationManager, "start", G_CALLBACK(notifyLocationManagerStart), this);
+    g_signal_connect(m_locationManager, "stop", G_CALLBACK(notifyLocationManagerStop), this);
 
     if (!m_url.isEmpty())
         webkit_web_view_load_uri(m_webView.get(), m_url.toString().toUtf8().constData());
@@ -243,7 +252,7 @@ void WPEQtView::notifyLoadFailedCallback(WebKitWebView*, WebKitLoadEvent, const 
     Q_EMIT view->loadingChanged(loadRequest.get());
 }
 
-void WPEQtView::notifyThemeColorChangedCallback(WebKitWebView*, WPEQtView* view)
+void WPEQtView::notifyThemeColorChangedCallback(WPEQtView* view)
 {
     qDebug() << Q_FUNC_INFO << "";
     Q_EMIT view->themeColorChanged();
@@ -257,6 +266,24 @@ void WPEQtView::notifyWebProcessTerminatedCallback(WebKitWebView*, WebKitWebProc
 void WPEQtView::notifyRunFileChooserCallback(WebKitWebView*, WebKitFileChooserRequest* request, WPEQtView* view)
 {
     view->makeFileChooserRequest(request);
+}
+
+void WPEQtView::notifyPermissionRequestCallback(WebKitWebView *web_view, WebKitPermissionRequest *request, WPEQtView* view)
+{
+    if (!request)
+        return;
+
+    webkit_permission_request_allow(request);
+}
+
+void WPEQtView::notifyLocationManagerStart(WebKitWebView*, WebKitGeolocationManager* manager, WPEQtView* view)
+{
+    view->startLocationServices();
+}
+
+void WPEQtView::notifyLocationManagerStop(WebKitWebView*, WebKitGeolocationManager* manager, WPEQtView* view)
+{
+    view->stopLocationServices();
 }
 
 void WPEQtView::makeFileChooserRequest(WebKitFileChooserRequest* request)
@@ -521,6 +548,34 @@ void WPEQtView::stop()
 {
     if (m_webView)
         webkit_web_view_stop_loading(m_webView.get());
+}
+
+void WPEQtView::startLocationServices()
+{
+    QSharedPointer<QGeoPositionInfoSource> source = QSharedPointer<QGeoPositionInfoSource>(QGeoPositionInfoSource::createDefaultSource(this));
+    if (source.get()) {
+        connect(source.get(), &QGeoPositionInfoSource::positionUpdated,
+                this,[=](QGeoPositionInfo info){
+            // Update WebKit location
+            WebKitGeolocationPosition* position =
+                webkit_geolocation_position_new(info.coordinate().longitude(),
+                                                info.coordinate().latitude(),
+                                                15.0);
+            webkit_geolocation_manager_update_position(webkit_web_context_get_geolocation_manager(m_webContext.get()), position);
+            webkit_geolocation_position_free(position);
+        });
+        source->startUpdates();
+        m_locationSource = source;
+    }
+}
+
+void WPEQtView::stopLocationServices()
+{
+    if (!m_locationSource)
+        return;
+
+    m_locationSource->stopUpdates();
+    m_locationSource.reset(nullptr);
 }
 
 /*!

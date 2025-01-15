@@ -11,6 +11,7 @@ set(qtwpe_LIBRARIES
     Qt${QT_VERSION}::Gui
     Qt${QT_VERSION}::GuiPrivate
     Qt${QT_VERSION}::Quick
+    Qt${QT_VERSION}::Location
     PkgConfig::EGL
     PkgConfig::EPOXY
     PkgConfig::WPE
