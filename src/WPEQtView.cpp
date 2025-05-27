@@ -19,12 +19,13 @@
  */
 
 #include "config.h"
-#include "WPEQtView.h"
 
-#include "WPEQtViewBackend.h"
 #include "WPEQtViewLoadRequest.h"
 #include "WPEQtViewLoadRequestPrivate.h"
+#include "WPEQtViewPrivate.h"
+#include "WPEViewQtQuick.h"
 #include "WPEQtImContext.h"
+
 #include <QGuiApplication>
 #include <QQuickWindow>
 #include <QSGSimpleTextureNode>
@@ -48,6 +49,7 @@
 */
 WPEQtView::WPEQtView(QQuickItem* parent)
     : QQuickItem(parent)
+    , d_ptr(new WPEQtViewPrivate)
 {
     connect(this, &QQuickItem::windowChanged, this, &WPEQtView::configureWindow);
     setFlag(ItemHasContents, true);
@@ -58,20 +60,22 @@ WPEQtView::WPEQtView(QQuickItem* parent)
 
 WPEQtView::~WPEQtView()
 {
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyUrlChangedCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyTitleChangedCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLoadChangedCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLoadFailedCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLoadProgressCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyThemeColorChangedCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyWebProcessTerminatedCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyRunFileChooserCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyPermissionRequestCallback), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLocationManagerStart), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(notifyLocationManagerStop), this);
-    g_signal_handlers_disconnect_by_func(m_webView.get(), reinterpret_cast<gpointer>(createRequested), this);
+    Q_D(WPEQtView);
 
-    webkit_web_view_terminate_web_process(m_webView.get());
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyUrlChangedCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyTitleChangedCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyLoadChangedCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyLoadFailedCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyLoadProgressCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyThemeColorChangedCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyWebProcessTerminatedCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyRunFileChooserCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyPermissionRequestCallback), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyLocationManagerStart), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(notifyLocationManagerStop), this);
+    g_signal_handlers_disconnect_by_func(d->m_webView.get(), reinterpret_cast<gpointer>(createRequested), this);
+
+    webkit_web_view_terminate_web_process(d->m_webView.get());
 }
 
 #if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
@@ -80,9 +84,21 @@ void WPEQtView::geometryChange(const QRectF& newGeometry, const QRectF&)
 void WPEQtView::geometryChanged(const QRectF& newGeometry, const QRectF&)
 #endif
 {
-    m_size = newGeometry.size();
-    if (m_backend)
-        m_backend->resize(newGeometry.size());
+    Q_D(WPEQtView);
+
+    auto newSize = newGeometry.size().toSize();
+    if (newSize.width() <= 0 || newSize.height() <= 0) {
+        qWarning() << "WPEQtView::geometryChange(), ignoring invalid resize to new size " << newSize << " keeping old size " << d->m_size;
+        return;
+    }
+
+    d->m_size = newSize;
+    if (!d->m_webView)
+        return;
+
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    if (auto* wpeToplevel = wpe_view_get_toplevel(wpeView))
+        wpe_toplevel_resize(wpeToplevel, d->m_size.width(), d->m_size.height());
 }
 
 void WPEQtView::configureWindow()
@@ -111,17 +127,18 @@ static QOpenGLContext *glContext(QQuickWindow *window)
 #endif
 }
 
+#if 1
 void WPEQtView::createWebView()
 {
-    if (m_backend)
-        return;
+    Q_D(WPEQtView);
+    RELEASE_ASSERT(!d->m_webView);
 
-    auto display = static_cast<EGLDisplay>(QGuiApplication::platformNativeInterface()->nativeResourceForIntegration("egldisplay"));
-    auto* context = glContext(window());
-    std::unique_ptr<WPEQtViewBackend> backend = WPEQtViewBackend::create(m_size, context, display, QPointer<WPEQtView>(this));
-    RELEASE_ASSERT_WITH_MESSAGE(backend, "EGL initialization failed");
-    if (!backend)
+    GUniqueOutPtr<GError> error;
+    auto* wpeDisplay = wpe_display_qtquick_new();
+    if (!wpe_display_connect(wpeDisplay, &error.outPtr())) {
+        g_warning("Failed to initialize WPE display: %s", error->message);
         return;
+    }
 
     const auto appName = QGuiApplication::applicationName();
     const auto dataHome = QString::fromUtf8(qgetenv("XDG_DATA_HOME"));
@@ -144,7 +161,6 @@ void WPEQtView::createWebView()
 
     const auto userAgent = QStringLiteral("Mozilla/5.0 (X11; Ubuntu; Linux) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15 (like iPhone OS)");
 
-    m_backend = backend.get();
     auto settings = adoptGRef(webkit_settings_new_with_settings(
         "enable-developer-extras", TRUE,
         "enable-webgl", TRUE,
@@ -159,43 +175,86 @@ void WPEQtView::createWebView()
         nullptr)
     );
 
-    m_webView = adoptGRef(WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
-        "backend", webkit_web_view_backend_new(m_backend->backend(), [](gpointer data) {
-            delete static_cast<WPEQtViewBackend*>(data);
-        }, backend.release()),
+    d->m_webView = adoptGRef(WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
         "settings", settings.get(),
         "network-session", m_networkSession.get(),
         "web-context", m_webContext.get(),
         nullptr)));
 
-    m_backend->setScaleFactor(window()->devicePixelRatio());
-
     m_imContext = wpeqt_im_context_new(this);
-    webkit_web_view_set_input_method_context(m_webView.get(), m_imContext);
+    webkit_web_view_set_input_method_context(d->m_webView.get(), m_imContext);
 
-    g_signal_connect_swapped(m_webView.get(), "notify::uri", G_CALLBACK(notifyUrlChangedCallback), this);
-    g_signal_connect_swapped(m_webView.get(), "notify::title", G_CALLBACK(notifyTitleChangedCallback), this);
-    g_signal_connect_swapped(m_webView.get(), "notify::estimated-load-progress", G_CALLBACK(notifyLoadProgressCallback), this);
-    g_signal_connect_swapped(m_webView.get(), "notify::theme-color", G_CALLBACK(notifyThemeColorChangedCallback), this);
-    g_signal_connect(m_webView.get(), "load-changed", G_CALLBACK(notifyLoadChangedCallback), this);
-    g_signal_connect(m_webView.get(), "load-failed", G_CALLBACK(notifyLoadFailedCallback), this);
-    g_signal_connect(m_webView.get(), "create", G_CALLBACK(createRequested), this);
-    g_signal_connect(m_webView.get(), "web-process-terminated", G_CALLBACK(notifyWebProcessTerminatedCallback), this);
-    g_signal_connect(m_webView.get(), "run-file-chooser", G_CALLBACK(notifyRunFileChooserCallback), this);
+    g_signal_connect_swapped(d->m_webView.get(), "notify::uri", G_CALLBACK(notifyUrlChangedCallback), this);
+    g_signal_connect_swapped(d->m_webView.get(), "notify::title", G_CALLBACK(notifyTitleChangedCallback), this);
+    g_signal_connect_swapped(d->m_webView.get(), "notify::estimated-load-progress", G_CALLBACK(notifyLoadProgressCallback), this);
+    g_signal_connect_swapped(d->m_webView.get(), "notify::theme-color", G_CALLBACK(notifyThemeColorChangedCallback), this);
+    g_signal_connect(d->m_webView.get(), "load-changed", G_CALLBACK(notifyLoadChangedCallback), this);
+    g_signal_connect(d->m_webView.get(), "load-failed", G_CALLBACK(notifyLoadFailedCallback), this);
+    g_signal_connect(d->m_webView.get(), "create", G_CALLBACK(createRequested), this);
+    g_signal_connect(d->m_webView.get(), "web-process-terminated", G_CALLBACK(notifyWebProcessTerminatedCallback), this);
+    g_signal_connect(d->m_webView.get(), "run-file-chooser", G_CALLBACK(notifyRunFileChooserCallback), this);
 
-    g_signal_connect(m_webView.get(), "permission-request", G_CALLBACK(notifyPermissionRequestCallback), this);
+    g_signal_connect(d->m_webView.get(), "permission-request", G_CALLBACK(notifyPermissionRequestCallback), this);
 
     m_locationManager = webkit_web_context_get_geolocation_manager(m_webContext.get());
     g_signal_connect(m_locationManager, "start", G_CALLBACK(notifyLocationManagerStart), this);
     g_signal_connect(m_locationManager, "stop", G_CALLBACK(notifyLocationManagerStop), this);
 
+    g_signal_connect(m_networkSession.get(), "download-started", G_CALLBACK(notifyDownloadStart), this);
+
     if (!m_url.isEmpty())
-        webkit_web_view_load_uri(m_webView.get(), m_url.toString().toUtf8().constData());
+        webkit_web_view_load_uri(d->m_webView.get(), m_url.toString().toUtf8().constData());
     else if (!m_html.isEmpty())
-        webkit_web_view_load_html(m_webView.get(), m_html.toUtf8().constData(), m_baseUrl.toString().toUtf8().constData());
+        webkit_web_view_load_html(d->m_webView.get(), m_html.toUtf8().constData(), m_baseUrl.toString().toUtf8().constData());
 
     Q_EMIT webViewCreated();
 }
+#endif
+
+#if 0
+void WPEQtView::createWebView()
+{
+    Q_D(WPEQtView);
+    RELEASE_ASSERT(!d->m_webView);
+
+    GUniqueOutPtr<GError> error;
+    auto* wpeDisplay = wpe_display_qtquick_new();
+    if (!wpe_display_connect(wpeDisplay, &error.outPtr())) {
+        g_warning("Failed to initialize WPE display: %s", error->message);
+        return;
+    }
+
+    auto settings = adoptGRef(webkit_settings_new_with_settings("enable-developer-extras", TRUE, nullptr));
+    d->m_webView = adoptGRef(WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
+        "display", wpeDisplay,
+        "settings", settings.get(), nullptr)));
+
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    if (auto* wpeToplevel = wpe_view_get_toplevel(wpeView))
+        wpe_toplevel_resize(wpeToplevel, d->m_size.width(), d->m_size.height());
+
+    wpe_view_map(wpeView); // FIXME: unmap when appropriate and implement can_be_mapped if needed.
+
+    if (!wpe_view_qtquick_initialize_rendering(WPE_VIEW_QTQUICK(wpeView), this, &error.outPtr())) {
+        g_warning("Failed to create Web view: %s", error->message);
+        d->m_webView = nullptr;
+        return;
+    }
+
+    g_signal_connect_swapped(d->m_webView.get(), "notify::uri", G_CALLBACK(notifyUrlChangedCallback), this);
+    g_signal_connect_swapped(d->m_webView.get(), "notify::title", G_CALLBACK(notifyTitleChangedCallback), this);
+    g_signal_connect_swapped(d->m_webView.get(), "notify::estimated-load-progress", G_CALLBACK(notifyLoadProgressCallback), this);
+    g_signal_connect(d->m_webView.get(), "load-changed", G_CALLBACK(notifyLoadChangedCallback), this);
+    g_signal_connect(d->m_webView.get(), "load-failed", G_CALLBACK(notifyLoadFailedCallback), this);
+
+    if (!d->m_url.isEmpty())
+        webkit_web_view_load_uri(d->m_webView.get(), d->m_url.toString().toUtf8().constData());
+    else if (!d->m_html.isEmpty())
+        webkit_web_view_load_html(d->m_webView.get(), d->m_html.toUtf8().constData(), d->m_baseUrl.toString().toUtf8().constData());
+
+    Q_EMIT webViewCreated();
+}
+#endif
 
 void WPEQtView::notifyUrlChangedCallback(WPEQtView* view)
 {
@@ -286,6 +345,11 @@ void WPEQtView::notifyLocationManagerStop(WebKitWebView*, WebKitGeolocationManag
     view->stopLocationServices();
 }
 
+void WPEQtView::notifyDownloadStart(WebKitNetworkSession* self, WebKitDownload* download, WPEQtView* user_data)
+{
+    //TODO: Use lownload manager
+}
+
 void WPEQtView::makeFileChooserRequest(WebKitFileChooserRequest* request)
 {
     if (!request)
@@ -351,38 +415,46 @@ void *WPEQtView::createRequested(WebKitWebView* web_view, WebKitNavigationAction
     return nullptr;
 }
 
+void WPEQtView::didUpdateScene()
+{
+    Q_D(WPEQtView);
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_qtquick_did_update_scene(WPE_VIEW_QTQUICK(wpeView));
+}
+
 QSGNode* WPEQtView::updatePaintNode(QSGNode* node, UpdatePaintNodeData*)
 {
-    if (!m_webView || !m_backend)
+    Q_D(WPEQtView);
+    if (!d->m_webView)
         return node;
 
     auto* textureNode = static_cast<QSGSimpleTextureNode*>(node);
     if (!textureNode)
         textureNode = new QSGSimpleTextureNode();
 
-    GLuint textureId = m_backend->texture(glContext(window()));
-    if (!textureId)
-        return node;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
 
-#if (QT_VERSION >= QT_VERSION_CHECK(6, 0, 0))
-    QSGTexture *texture = QNativeInterface::QSGOpenGLTexture::fromNative(textureId, window(), m_size.toSize(), QQuickWindow::TextureHasAlphaChannel);
-#elif (QT_VERSION >= QT_VERSION_CHECK(5, 15, 0))
-    auto texture = window()->createTextureFromNativeObject(QQuickWindow::NativeObjectTexture, &textureId, 0, m_size.toSize(), QQuickWindow::TextureHasAlphaChannel);
-#else
-    auto texture = window()->createTextureFromId(textureId, m_size.toSize(), QQuickWindow::TextureHasAlphaChannel);
-#endif
+    GUniqueOutPtr<GError> error;
+    auto texture = wpe_view_qtquick_render_buffer_to_texture(WPE_VIEW_QTQUICK(wpeView), d->m_size, window(), &error.outPtr());
+    if (!texture) {
+        g_warning("Failed to update WPEQtView paint node in scene graph: %s", error->message);
+        return node;
+    }
+
     textureNode->setTexture(texture);
     textureNode->setRect(boundingRect());
+    triggerDidUpdateScene();
     return textureNode;
 }
 
 QUrl WPEQtView::url() const
 {
-    if (!m_webView)
-        return m_url;
+    Q_D(const WPEQtView);
+    if (!d->m_webView)
+        return d->m_url;
 
-    const gchar* uri = webkit_web_view_get_uri(m_webView.get());
-    return uri ? QUrl(QString(uri)) : m_url;
+    const gchar* uri = webkit_web_view_get_uri(d->m_webView.get());
+    return uri ? QUrl(QString(uri)) : d->m_url;
 }
 
 /*!
@@ -398,13 +470,14 @@ QUrl WPEQtView::url() const
 */
 void WPEQtView::setUrl(const QUrl& url)
 {
-    if (url == m_url)
+    Q_D(WPEQtView);
+    if (url == d->m_url)
         return;
 
-    m_errorOccured = false;
-    m_url = url;
-    if (m_webView)
-        webkit_web_view_load_uri(m_webView.get(), m_url.toString().toUtf8().constData());
+    d->m_errorOccured = false;
+    d->m_url = url;
+    if (d->m_webView)
+        webkit_web_view_load_uri(d->m_webView.get(), d->m_url.toString().toUtf8().constData());
 }
 
 /*!
@@ -416,10 +489,11 @@ void WPEQtView::setUrl(const QUrl& url)
 */
 int WPEQtView::loadProgress() const
 {
-    if (!m_webView)
+    Q_D(const WPEQtView);
+    if (!d->m_webView)
         return 0;
 
-    return webkit_web_view_get_estimated_load_progress(m_webView.get()) * 100;
+    return webkit_web_view_get_estimated_load_progress(d->m_webView.get()) * 100;
 }
 
 /*!
@@ -430,10 +504,11 @@ int WPEQtView::loadProgress() const
 */
 QString WPEQtView::title() const
 {
-    if (!m_webView)
+    Q_D(const WPEQtView);
+    if (!d->m_webView)
         return "";
 
-    return webkit_web_view_get_title(m_webView.get());
+    return webkit_web_view_get_title(d->m_webView.get());
 }
 
 /*!
@@ -444,10 +519,11 @@ QString WPEQtView::title() const
 */
 bool WPEQtView::canGoBack() const
 {
-    if (!m_webView)
+    Q_D(const WPEQtView);
+    if (!d->m_webView)
         return false;
 
-    return webkit_web_view_can_go_back(m_webView.get());
+    return webkit_web_view_can_go_back(d->m_webView.get());
 }
 
 /*!
@@ -475,10 +551,11 @@ bool WPEQtView::canGoBack() const
 */
 bool WPEQtView::isLoading() const
 {
-    if (!m_webView)
+    Q_D(const WPEQtView);
+    if (!d->m_webView)
         return false;
 
-    return webkit_web_view_is_loading(m_webView.get());
+    return webkit_web_view_is_loading(d->m_webView.get());
 }
 
 /*!
@@ -489,21 +566,11 @@ bool WPEQtView::isLoading() const
 */
 bool WPEQtView::canGoForward() const
 {
-    if (!m_webView)
+    Q_D(const WPEQtView);
+    if (!d->m_webView)
         return false;
 
-    return webkit_web_view_can_go_forward(m_webView.get());
-}
-
-QColor WPEQtView::themeColor() const
-{
-    if (!m_webView)
-        return QColor(Qt::white);
-
-    WebKitColor color { 1.0, 1.0, 1.0, 1.0 };
-    webkit_web_view_get_theme_color(m_webView.get(), &color);
-    const auto qtColor = QColor(color.red * 255, color.green * 255, color.blue * 255, color.alpha * 255);
-    return qtColor;
+    return webkit_web_view_can_go_forward(d->m_webView.get());
 }
 
 /*!
@@ -513,8 +580,9 @@ QColor WPEQtView::themeColor() const
 */
 void WPEQtView::goBack()
 {
-    if (m_webView)
-        webkit_web_view_go_back(m_webView.get());
+    Q_D(WPEQtView);
+    if (d->m_webView)
+        webkit_web_view_go_back(d->m_webView.get());
 }
 
 /*!
@@ -524,8 +592,9 @@ void WPEQtView::goBack()
 */
 void WPEQtView::goForward()
 {
-    if (m_webView)
-        webkit_web_view_go_forward(m_webView.get());
+    Q_D(WPEQtView);
+    if (d->m_webView)
+        webkit_web_view_go_forward(d->m_webView.get());
 }
 
 /*!
@@ -535,8 +604,9 @@ void WPEQtView::goForward()
 */
 void WPEQtView::reload()
 {
-    if (m_webView)
-        webkit_web_view_reload(m_webView.get());
+    Q_D(WPEQtView);
+    if (d->m_webView)
+        webkit_web_view_reload(d->m_webView.get());
 }
 
 /*!
@@ -546,36 +616,9 @@ void WPEQtView::reload()
 */
 void WPEQtView::stop()
 {
-    if (m_webView)
-        webkit_web_view_stop_loading(m_webView.get());
-}
-
-void WPEQtView::startLocationServices()
-{
-    QSharedPointer<QGeoPositionInfoSource> source = QSharedPointer<QGeoPositionInfoSource>(QGeoPositionInfoSource::createDefaultSource(this));
-    if (source.get()) {
-        connect(source.get(), &QGeoPositionInfoSource::positionUpdated,
-                this,[=](QGeoPositionInfo info){
-            // Update WebKit location
-            WebKitGeolocationPosition* position =
-                webkit_geolocation_position_new(info.coordinate().longitude(),
-                                                info.coordinate().latitude(),
-                                                15.0);
-            webkit_geolocation_manager_update_position(webkit_web_context_get_geolocation_manager(m_webContext.get()), position);
-            webkit_geolocation_position_free(position);
-        });
-        source->startUpdates();
-        m_locationSource = source;
-    }
-}
-
-void WPEQtView::stopLocationServices()
-{
-    if (!m_locationSource)
-        return;
-
-    m_locationSource->stopUpdates();
-    m_locationSource.reset(nullptr);
+    Q_D(WPEQtView);
+    if (d->m_webView)
+        webkit_web_view_stop_loading(d->m_webView.get());
 }
 
 /*!
@@ -598,12 +641,13 @@ void WPEQtView::stopLocationServices()
 */
 void WPEQtView::loadHtml(const QString& html, const QUrl& baseUrl)
 {
-    m_html = html;
-    m_baseUrl = baseUrl;
-    m_errorOccured = false;
+    Q_D(WPEQtView);
+    d->m_html = html;
+    d->m_baseUrl = baseUrl;
+    d->m_errorOccured = false;
 
-    if (m_webView)
-        webkit_web_view_load_html(m_webView.get(), html.toUtf8().constData(), baseUrl.toString().toUtf8().constData());
+    if (d->m_webView)
+        webkit_web_view_load_html(d->m_webView.get(), html.toUtf8().constData(), baseUrl.toString().toUtf8().constData());
 }
 
 struct JavascriptCallbackData {
@@ -617,51 +661,41 @@ struct JavascriptCallbackData {
 
 static void jsAsyncReadyCallback(GObject* object, GAsyncResult* result, gpointer userData)
 {
-    GUniqueOutPtr<GError> error;
+    GError* error { nullptr };
     std::unique_ptr<JavascriptCallbackData> data(reinterpret_cast<JavascriptCallbackData*>(userData));
-
-    JSCValue* value = nullptr;
-
-#if WEBKIT_CHECK_VERSION(2, 40, 0)
-    value = webkit_web_view_evaluate_javascript_finish(WEBKIT_WEB_VIEW (object), result, &error.outPtr());
+    JSCValue* value = webkit_web_view_evaluate_javascript_finish(WEBKIT_WEB_VIEW(object), result, &error);
     if (!value) {
         qWarning("Error running javascript: %s", error->message);
+        g_error_free(error);
         return;
     }
-#else
-    WebKitJavascriptResult* jsResult = webkit_web_view_run_javascript_finish(WEBKIT_WEB_VIEW(object), result, &error.outPtr());
-    if (!jsResult) {
-        qWarning("Error running javascript: %s", error->message);
-        return;
-    }
-    value = webkit_javascript_result_get_js_value(jsResult);
-#endif
 
     if (data->object.data()) {
         QQmlEngine* engine = qmlEngine(data->object.data());
         if (!engine) {
             qWarning("No JavaScript engine, unable to handle JavaScript callback!");
-        } else {
-            QJSValueList args;
-            QVariant variant;
-            // FIXME: Handle more value types?
-            if (jsc_value_is_string(value)) {
-                GUniquePtr<gchar> strValue(jsc_value_to_string(value));
-                JSCContext* context = jsc_value_get_context(value);
-                JSCException* exception = jsc_context_get_exception(context);
-                if (exception) {
-                    qWarning("Error running javascript: %s", jsc_exception_get_message(exception));
-                    jsc_context_clear_exception(context);
-                } else
-                    variant.setValue(QString(g_strdup(strValue.get())));
-            }
-            args.append(engine->toScriptValue(variant));
-            data->callback.call(args);
+            g_object_unref(value);
+            return;
         }
+
+        QJSValueList args;
+        QVariant variant;
+        // FIXME: Handle more value types?
+        if (jsc_value_is_string(value)) {
+            auto* strValue = jsc_value_to_string(value);
+            JSCContext* context = jsc_value_get_context(value);
+            JSCException* exception = jsc_context_get_exception(context);
+            if (exception) {
+                qWarning("Error running javascript: %s", jsc_exception_get_message(exception));
+                jsc_context_clear_exception(context);
+            } else
+                variant.setValue(QString::fromUtf8(strValue));
+            g_free(strValue);
+        }
+        args.append(engine->toScriptValue(variant));
+        data->callback.call(args);
     }
-#if !WEBKIT_CHECK_VERSION(2, 40, 0)
-    webkit_javascript_result_unref(jsResult);
-#endif
+    g_object_unref(value);
 }
 
 /*!
@@ -677,74 +711,141 @@ static void jsAsyncReadyCallback(GObject* object, GAsyncResult* result, gpointer
 */
 void WPEQtView::runJavaScript(const QString& script, const QJSValue& callback)
 {
+    Q_D(WPEQtView);
     std::unique_ptr<JavascriptCallbackData> data = std::make_unique<JavascriptCallbackData>(callback, QPointer<WPEQtView>(this));
-#if WEBKIT_CHECK_VERSION(2, 40, 0)
-    webkit_web_view_evaluate_javascript(m_webView.get(), script.toUtf8().constData(), -1, nullptr, nullptr, nullptr, jsAsyncReadyCallback, data.release());
-#else
-    webkit_web_view_run_javascript(m_webView.get(), script.toUtf8().constData(), nullptr, jsAsyncReadyCallback, data.release());
-#endif
+    auto utf8Script = script.toUtf8();
+    webkit_web_view_evaluate_javascript(d->m_webView.get(), utf8Script.constData(), utf8Script.size(), nullptr, nullptr, nullptr, jsAsyncReadyCallback, data.release());
 }
 
-void WPEQtView::mouseMoveEvent(QMouseEvent* event)
+QColor WPEQtView::themeColor()
 {
-    if (m_backend)
-        m_backend->dispatchMouseMoveEvent(event);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return QColor(Qt::white);
+
+    WebKitColor color { 1.0, 1.0, 1.0, 1.0 };
+    webkit_web_view_get_theme_color(d->m_webView.get(), &color);
+    const auto qtColor = QColor(color.red * 255, color.green * 255, color.blue * 255, color.alpha * 255);
+    return qtColor;
+}
+
+void WPEQtView::startLocationServices()
+{
+    QSharedPointer<QGeoPositionInfoSource> source = QSharedPointer<QGeoPositionInfoSource>(QGeoPositionInfoSource::createDefaultSource(this));
+    if (source.get()) {
+        connect(source.get(), &QGeoPositionInfoSource::positionUpdated,
+                this,[&, this](QGeoPositionInfo info){
+            // Update WebKit location
+            WebKitGeolocationPosition* position =
+                webkit_geolocation_position_new(info.coordinate().longitude(),
+                                                info.coordinate().latitude(),
+                                                15.0);
+            webkit_geolocation_manager_update_position(webkit_web_context_get_geolocation_manager(m_webContext.get()), position);
+            webkit_geolocation_position_free(position);
+        });
+        source->startUpdates();
+        m_locationSource = source;
+    }
+}
+
+void WPEQtView::stopLocationServices()
+{
+    if (!m_locationSource)
+        return;
+
+    m_locationSource->stopUpdates();
+    m_locationSource.reset(nullptr);
 }
 
 void WPEQtView::mousePressEvent(QMouseEvent* event)
 {
+    Q_D(WPEQtView);
     forceActiveFocus();
-    if (m_backend)
-        m_backend->dispatchMousePressEvent(event);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_mouse_press_event(WPE_VIEW_QTQUICK(wpeView), event);
+}
+
+void WPEQtView::mouseMoveEvent(QMouseEvent* event)
+{
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_mouse_move_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (m_backend)
-        m_backend->dispatchMouseReleaseEvent(event);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_mouse_release_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::hoverEnterEvent(QHoverEvent* event)
 {
-    if (m_backend)
-        m_backend->dispatchHoverEnterEvent(event);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_hover_enter_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::hoverLeaveEvent(QHoverEvent* event)
 {
-    if (m_backend)
-        m_backend->dispatchHoverLeaveEvent(event);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_hover_leave_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::hoverMoveEvent(QHoverEvent* event)
 {
-    if (m_backend)
-        m_backend->dispatchHoverMoveEvent(event);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_hover_move_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::wheelEvent(QWheelEvent* event)
 {
-    if (m_backend)
-        m_backend->dispatchWheelEvent(event);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_wheel_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::keyPressEvent(QKeyEvent* event)
 {
-    if (m_backend)
-        m_backend->dispatchKeyEvent(event, true);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_key_press_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::keyReleaseEvent(QKeyEvent* event)
 {
-    if (m_backend)
-        m_backend->dispatchKeyEvent(event, false);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_key_release_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::touchEvent(QTouchEvent* event)
 {
-    forceActiveFocus();
-    if (m_backend)
-        m_backend->dispatchTouchEvent(event);
+    Q_D(WPEQtView);
+    if (!d->m_webView)
+        return;
+    auto* wpeView = webkit_web_view_get_wpe_view(d->m_webView.get());
+    wpe_view_dispatch_touch_event(WPE_VIEW_QTQUICK(wpeView), event);
 }
 
 void WPEQtView::inputMethodEvent(QInputMethodEvent* event)

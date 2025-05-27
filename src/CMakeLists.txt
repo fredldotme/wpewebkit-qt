@@ -1,5 +1,7 @@
 set(qtwpe_SOURCES
-    WPEQtViewBackend.cpp
+    WPEDisplayQtQuick.cpp
+    WPEToplevelQtQuick.cpp
+    WPEViewQtQuick.cpp
     WPEQmlExtensionPlugin.cpp
     WPEQtView.cpp
     WPEQtViewLoadRequest.cpp
@@ -17,13 +19,14 @@ set(qtwpe_LIBRARIES
     PkgConfig::WPE
     PkgConfig::WPE_FDO
     PkgConfig::WPE_WEBKIT
+    PkgConfig::LOMIRI_DOWNLOAD_MANAGER
 )
 
 add_library(qtwpe MODULE ${qtwpe_SOURCES})
 set_target_properties(qtwpe PROPERTIES
     OUTPUT_NAME qtwpe
     AUTOMOC ON
-    CXX_STANDARD 14
+    CXX_STANDARD 20
 )
 target_compile_definitions(qtwpe PUBLIC QT_NO_KEYWORDS=1)
 target_link_libraries(qtwpe ${qtwpe_LIBRARIES})

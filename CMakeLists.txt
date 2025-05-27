@@ -25,6 +25,8 @@ pkg_check_modules(EPOXY epoxy IMPORTED_TARGET)
 pkg_check_modules(WPE wpe-1.0 IMPORTED_TARGET)
 pkg_check_modules(WPE_FDO wpebackend-fdo-1.0 IMPORTED_TARGET)
 pkg_check_modules(WPE_WEBKIT wpe-webkit-1.0 IMPORTED_TARGET)
+pkg_check_modules(LOMIRI_DOWNLOAD_MANAGER lomiri-download-manager-client IMPORTED_TARGET)
+
 if(NOT WPE_WEBKIT_FOUND)
     pkg_check_modules(WPE_WEBKIT wpe-webkit-1.1 IMPORTED_TARGET)
     if(NOT WPE_WEBKIT_FOUND)

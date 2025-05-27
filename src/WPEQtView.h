@@ -31,8 +31,13 @@
 #include <wpe/webkit.h>
 #include <wtf/glib/GRefPtr.h>
 
-class WPEQtViewBackend;
+#if 0
+#include <lomiri/download_manager/download.h>
+#include <lomiri/download_manager/manager.h>
+#endif
+
 class WPEQtViewLoadRequest;
+class WPEQtViewPrivate;
 
 class WPEQtView : public QQuickItem {
     Q_OBJECT
@@ -58,7 +63,8 @@ public:
     ~WPEQtView();
     QSGNode* updatePaintNode(QSGNode*, UpdatePaintNodeData*) final;
 
-    void triggerUpdate() { QMetaObject::invokeMethod(this, "update"); };
+    void triggerUpdateScene() { QMetaObject::invokeMethod(this, "update", Qt::QueuedConnection); };
+    void triggerDidUpdateScene() { QMetaObject::invokeMethod(this, "didUpdateScene", Qt::QueuedConnection); };
 
     QUrl url() const;
     void setUrl(const QUrl&);
@@ -67,7 +73,7 @@ public:
     bool canGoBack() const;
     bool isLoading() const;
     bool canGoForward() const;
-    QColor themeColor() const;
+    QColor themeColor();
 
     void makeFileChooserRequest(WebKitFileChooserRequest* request);
 
@@ -123,6 +129,7 @@ protected:
 private Q_SLOTS:
     void configureWindow();
     void createWebView();
+    void didUpdateScene();
 
 private:
     static void notifyUrlChangedCallback(WPEQtView*);
@@ -136,9 +143,9 @@ private:
     static void notifyPermissionRequestCallback(WebKitWebView *web_view, WebKitPermissionRequest *permission_request, WPEQtView* view);
     static void notifyLocationManagerStart(WebKitWebView*, WebKitGeolocationManager* manager, WPEQtView*);
     static void notifyLocationManagerStop(WebKitWebView*, WebKitGeolocationManager* manager, WPEQtView*);
+    static void notifyDownloadStart(WebKitNetworkSession* self, WebKitDownload* download, WPEQtView*);
     static void *createRequested(WebKitWebView*, WebKitNavigationAction*, WPEQtView*);
 
-    GRefPtr<WebKitWebView> m_webView;
     GRefPtr<WebKitNetworkSession> m_networkSession;
     GRefPtr<WebKitWebContext> m_webContext;
     WebKitFileChooserRequest* m_currentFileChooserRequest { nullptr };
@@ -146,11 +153,16 @@ private:
     QString m_html;
     QUrl m_baseUrl;
     QSizeF m_size;
-    WPEQtViewBackend* m_backend { nullptr };
     bool m_errorOccured { false };
     WebKitInputMethodContext *m_imContext = nullptr;
     WebKitGeolocationManager *m_locationManager = nullptr;
     QSharedPointer<QGeoPositionInfoSource> m_locationSource;
 
-    friend class WPEQtViewBackend;
+#if 0
+    Lomiri::DownloadManager::Manager* m_downloadManager;
+    std::map<std::string, Lomiri::DownloadManager::Download*> m_downloads;
+#endif
+
+    Q_DECLARE_PRIVATE(WPEQtView)
+    QScopedPointer<WPEQtViewPrivate> d_ptr;
 };
